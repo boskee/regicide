@@ -83,7 +83,7 @@ class SagaAPI(object):
                     "receiverCoreUserId": self.userId
                 }],
                 "placement": placement,
-                "title": "Candy Crush Level Unlock",
+                "title": "Level Unlock",
                 "description": "Buy your way to the next level.",
                 "currency": "KHC"
             }]
@@ -118,92 +118,89 @@ class SagaAPI(object):
         return response
 
     def print_scores(self, episode, level):
-            scores = self.poll_levelScores(episode, level).json()
-            print json.dumps(scores.values()[0][0], sort_keys = False, indent = 4)
-            print json.dumps(scores.values()[0][1], sort_keys = False, indent = 4)
-            print json.dumps(scores.values()[0][2], sort_keys = False, indent = 4)
+        scores = self.poll_levelScores(episode, level).json()
+        print json.dumps(scores.values()[0][0], sort_keys = False, indent = 4)
+        print json.dumps(scores.values()[0][1], sort_keys = False, indent = 4)
+        print json.dumps(scores.values()[0][2], sort_keys = False, indent = 4)
    
     def print_status(self):
-            print json.dumps(self.poll_status().json(), sort_keys = False, indent = 4)
+        print json.dumps(self.poll_status().json(), sort_keys = False, indent = 4)
 
     def complete_level(self, level):
-            targetEpisode, targetLevel = self.get_episode_level(level)
+        targetEpisode, targetLevel = self.get_episode_level(level)
 
-            is_unlocked = self.is_level_unlocked(targetEpisode, targetLevel)
-            if not is_unlocked:
-                self.complete_level(level - 1)
+        is_unlocked = self.is_level_unlocked(targetEpisode, targetLevel)
+        if not is_unlocked:
+            self.complete_level(level - 1)
+        
+        response = self.play_game(targetEpisode, targetLevel).json()
 
-            print targetEpisode, targetLevel
-            
-            seed = self.start_game(targetEpisode, targetLevel)
-            self.end_game(targetEpisode, targetLevel, seed)
-
-    def get_episode_level(self, level):
-            if len(self.episodeLengths) == 0:
-                response = self.get_gameInit()
-                episodeDescriptions = response.json()["universeDescription"]["episodeDescriptions"]
-                for episode in episodeDescriptions:
-                    self.episodeLengths[episode["episodeId"]] = len(episode["levelDescriptions"])
-
-            targetEpisode = -1
-            targetLevel = level
-            currentEpisode = 1
-
-            while targetEpisode == -1:
-                if targetLevel > self.episodeLengths[currentEpisode]:
-                    targetLevel = targetLevel - self.episodeLengths[currentEpisode]
-                    currentEpisode = currentEpisode + 1
-                else:
-                    targetEpisode = currentEpisode
+        if response["episodeId"] == -1:
+            needUnlock = False
+            for event in response["events"]:
+                if event["type"] == "LEVEL_LOCKED":
+                    needUnlock = True
                     break
 
-            return targetEpisode, targetLevel
+            if needUnlock:
+                self.post_unlockLevel(targetEpisode, targetLevel)
+                self.complete_level(level)
+
+    def get_episode_level(self, level):
+        if len(self.episodeLengths) == 0:
+            response = self.get_gameInit()
+            episodeDescriptions = response.json()["universeDescription"]["episodeDescriptions"]
+            for episode in episodeDescriptions:
+                self.episodeLengths[episode["episodeId"]] = len(episode["levelDescriptions"])
+
+        targetEpisode = -1
+        targetLevel = level
+        currentEpisode = 1
+
+        while targetEpisode == -1:
+            if targetLevel > self.episodeLengths[currentEpisode]:
+                targetLevel = targetLevel - self.episodeLengths[currentEpisode]
+                currentEpisode = currentEpisode + 1
+            else:
+                targetEpisode = currentEpisode
+                break
+
+        return targetEpisode, targetLevel
            
     def play_gameAutoScore(self, episode, level, starProgressions=None):
-            if starProgressions is not None:
-                minPoints = starProgressions["universeDescription"]["episodeDescriptions"][episode-1]["levelDescriptions"][level-1]["starProgressions"][2]["points"]
-                randomScore = 1
-                while (randomScore % 2 != 0):
-                    # generate a random number at most 50000 points over the min 3 star and keep trying until it is even
-                    randomScore = random.randrange(minPoints/10, minPoints/10+5000)
-                myScore = randomScore * 10
-                # print "Score: %s out of %s" % (myScore, minPoints)
-            else:
-                # revert to pulling the top scores. This probably won't work if none of your friends have made it to that level
-                scoreList = self.poll_levelScores(episode, level).json()
-                # take the top score and add 5000 points
-                myScore = scoreList.values()[0][0]["value"] + 5000
-           
-            seed = self.start_game(episode, level)
-            endResult = self.end_game(episode, level, seed, myScore)
+        if starProgressions is not None:
+            minPoints = starProgressions["universeDescription"]["episodeDescriptions"][episode-1]["levelDescriptions"][level-1]["starProgressions"][2]["points"]
+            randomScore = 1
+            while (randomScore % 2 != 0):
+                # generate a random number at most 50000 points over the min 3 star and keep trying until it is even
+                randomScore = random.randrange(minPoints/10, minPoints/10+5000)
+            myScore = randomScore * 10
+            # print "Score: %s out of %s" % (myScore, minPoints)
+        else:
+            # revert to pulling the top scores. This probably won't work if none of your friends have made it to that level
+            scoreList = self.poll_levelScores(episode, level).json()
+            # take the top score and add 5000 points
+            myScore = scoreList.values()[0][0]["value"] + 5000
 
-            return endResult
+        return self.play_game(episode, level, myScore)
 
     def play_gameLoop(self, episode, level):
-            # create a JSON file full of tons and tons of data but only call it once since it is so large
-            starProgressions = self.get_gameInit().json()
-           
-            while True:
+        # create a JSON file full of tons and tons of data but only call it once since it is so large
+        starProgressions = self.get_gameInit().json()
+       
+        while True:
+            try:
+                result = self.play_gameAutoScore(episode, level, starProgressions).json()
+                print "Beat episode {0} level {1}".format(episode,level)
+               
                 try:
-                    result = self.play_gameAutoScore(episode, level, starProgressions).json()
-                    print "Beat episode {0} level {1}".format(episode,level)
-                   
-                    try:
-                        # This is not quite right but it works since LEVEL_GOLD_REWARD still has a episodeId and levelId like LEVEL_UNLOCKED
-                        # This only beats new levels that reported back the new unlocked level
-                        data = json.loads(result["events"][0].values()[2])
-                        data["episodeId"]
-                        data["levelId"]
-                        level = level + 1
-                    except KeyError:
-                        print "Next level wasn't reported, Trying to unlock episode %s..." % (episode+1)
-                        self.post_unlockLevel(episode, level-1)
-                        episode = episode + 1
-                        level = 1
-                    except:
-                        print sys.exc_info()[0]
-                        break
-                except IndexError:
+                    # This is not quite right but it works since LEVEL_GOLD_REWARD still has a episodeId and levelId like LEVEL_UNLOCKED
+                    # This only beats new levels that reported back the new unlocked level
+                    data = json.loads(result["events"][0].values()[2])
+                    data["episodeId"]
+                    data["levelId"]
+                    level = level + 1
+                except KeyError:
                     print "Next level wasn't reported, Trying to unlock episode %s..." % (episode+1)
                     self.post_unlockLevel(episode, level-1)
                     episode = episode + 1
@@ -211,6 +208,14 @@ class SagaAPI(object):
                 except:
                     print sys.exc_info()[0]
                     break
+            except IndexError:
+                print "Next level wasn't reported, Trying to unlock episode %s..." % (episode+1)
+                self.post_unlockLevel(episode, level-1)
+                episode = episode + 1
+                level = 1
+            except:
+                print sys.exc_info()[0]
+                break
 
     def play_game(self, episode, level, score=None):
         seed = self.start_game(episode, level)
