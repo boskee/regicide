@@ -16,10 +16,20 @@ class SagaAPI(object):
 
     unlockLevelItemId = -1
     unlockLevelImage = ""
+    debug = True
 
     def __init__(self, session, userId):
         self.session = session
         self.userId = userId
+
+    def api_get(self, method, params):
+        response = requests.get(self.apiUrl + "/" + method, params=params)
+        if self.debug:
+            print self.apiUrl + "/" + method + "\n"
+            print "===============================\n"
+            print response.text
+            print "\n"
+        return response
 
     def hand_out_winnings(self, item_type, amount):
         item = [
@@ -32,43 +42,38 @@ class SagaAPI(object):
             "arg2": 1,
             "arg3": "hash",
         }
-        response = requests.get(self.apiUrl + "/handOutItemWinnings", params=params)
-        print response.text
-        return response
+        return self.api_get("handOutItemWinnings", params)
  
     # gets the balance of all the items that the player has
     def get_balance(self):
         params = {"_session": self.session}
-        return requests.get(self.apiUrl + "/getBalance", params=params)
-
+        return self.api_get("getBalance", params)
 
     def get_gameInitLight(self):
         params = {"_session": self.session}
-        return requests.get(self.apiUrl + "/gameInitLight", params=params)
+        return self.api_get("gameInitLight", params)
            
     # full list with level details
     def get_gameInit(self):
         params = {"_session": self.session}
-        return requests.get(self.apiUrl + "/gameInit", params=params)
+        return self.api_get("gameInit", params)
 
     def add_life(self):
         params = {"_session": self.session}
-        return requests.get(self.apiUrl + "/addLife", params=params)
+        return self.api_get("addLife", params)
  
     def is_level_unlocked(self, episode, level):
         params = {"_session": self.session, "arg0": episode, "arg1": level}
-        response = requests.get(self.apiUrl + "/isLevelUnlocked", params=params)
+        response = self.api_get("isLevelUnlocked", params)
         return response.text == "true"
  
     def poll_episodeChampions(self, episode):
         params = {"_session": self.session, "arg0": episode}
-        response = requests.get(self.apiUrl + "/getEpisodeChampions", params=params)
-        return response
+        return self.api_get("getEpisodeChampions", params)
 
     def poll_levelScores(self, episode, level):
         params = {"_session": self.session, "arg0": episode, "arg1": level}
-        response = requests.get(self.apiUrl + "/getLevelToplist", params=params)
-        return response
+        return self.api_get("getLevelToplist", params)
 
     def post_unlockLevel(self, episode, level):
         params = {"_session": self.session}
@@ -89,13 +94,15 @@ class SagaAPI(object):
             }]
         }]
        
-        unlockAttempt = requests.post(self.clientApi, verify=False, params=params, data=json.dumps(payload))
-        print json.dumps(unlockAttempt.json(), sort_keys = False, indent = 4)
+        unlockAttempt = requests.post(self.clientApi, verify=False, params=params, data=json.dumps(payload)).json()
+        if self.debug:
+            print json.dumps(unlockAttempt, sort_keys = False, indent = 4)
+
+        return unlockAttempt[0]["result"]["status"] == "ok"
 
     def start_game(self, episode, level):
         params = {"_session": self.session, "arg0": episode, "arg1": level}
-        response = requests.get(self.apiUrl + "/gameStart", params=params)
-        return response.json()["seed"]
+        return self.api_get("gameStart", params).json()["seed"]
 
     def end_game(self, episode, level, seed, score=None):
         if score is None:
@@ -114,8 +121,7 @@ class SagaAPI(object):
         dic["cs"] = hashlib.md5("%(episodeId)s:%(levelId)s:%(score)s:%(timeLeftPercent)s:%(userId)s:%(seed)s:%(secret)s" % dic).hexdigest()[:6]
 
         params = {"_session": self.session, "arg0": json.dumps(dic)}
-        response = requests.get(self.apiUrl + "/gameEnd", params=params)
-        return response
+        return self.api_get("gameEnd", params)
 
     def print_scores(self, episode, level):
         scores = self.poll_levelScores(episode, level).json()
@@ -145,6 +151,8 @@ class SagaAPI(object):
             if needUnlock:
                 self.post_unlockLevel(targetEpisode, targetLevel)
                 self.complete_level(level)
+
+        print "Beat episode {0} level {1}".format(targetEpisode, targetLevel)
 
     def get_episode_level(self, level):
         if len(self.episodeLengths) == 0:
@@ -191,7 +199,6 @@ class SagaAPI(object):
         while True:
             try:
                 result = self.play_gameAutoScore(episode, level, starProgressions).json()
-                print "Beat episode {0} level {1}".format(episode,level)
                
                 try:
                     # This is not quite right but it works since LEVEL_GOLD_REWARD still has a episodeId and levelId like LEVEL_UNLOCKED
